@@ -1,28 +1,191 @@
-# 模型配置
-model:
-  name: "dinov2_vitb14"
-  layer: 11
-  vocab_path: "./models/aerial/c_centers-b.pt"
-  device: "cuda"  # cuda or cpu
-  warmup_iterations: 3
+# AnyLoc Enhanced Configuration File
+# Supports multiple feature extractors and aggregators
 
-# 数据路径配置
+# System Configuration
+system:
+  device: cuda
+  num_workers: 4
+  batch_size: 32
+  seed: 42
+
+# Data Paths
 data:
-  database_dir: "/root/autodl-tmp/data/source_tiles/img"
-  query_dir: "/root/autodl-tmp/data/target_drone_img"
-  output_dir: "/root/autodl-tmp/data/descriptors"
-  metadata_file: "/root/autodl-tmp/data/source_tiles/data.csv"
+  # Database paths
+  database_dir: /root/autodl-tmp/data/source_tiles/img
+  database_metadata: /root/autodl-tmp/data/source_tiles/data.csv
+  
+  # Query paths  
+  query_dir: /root/autodl-tmp/data/target_drone_img
+  
+  # Output paths
+  descriptor_dir: /root/autodl-tmp/data/descriptors
+  results_dir: /root/autodl-tmp/data/results
+  
+  # Cache paths
+  cache_dir: /root/autodl-tmp/data/cache
 
-# 检索配置
-retrieval:
-  index_type: "faiss"
-  similarity_metric: "cosine"
-  top_k: 10
-  use_gpu: true
+# Model Configuration
+model:
+  # Feature Extractor Settings
+  extractor:
+    # Model type: dinov2_vitg14, dinov2_vitb14, dinov3_vitb16, dinov3_vits16plus, resnet101
+    type: dinov2_vitg14
+    
+    # Layer for DINO models (ignored for ResNet)
+    layer: 31  # DINOv2: 31, DINOv3: 11
+    
+    # Facet for DINO models: query, key, value, token
+    facet: value
+    
+    # Checkpoint path for ResNet models (optional)
+    checkpoint_path: null
+    
+    # Model-specific paths
+    dinov3_repo: /root/zwb/dinov3  # DINOv3 local repository
+    
+  # Feature Aggregator Settings
+  aggregator:
+    # Aggregation type: vlad, gem
+    type: vlad
+    
+    # VLAD settings
+    vlad:
+      vocab_path: models/aerial/c_centers.pt
+      num_clusters: 64
+      
+      # Alternative vocabulary paths for different models
+      vocab_paths:
+        dinov2_vitg14: models/aerial/c_centers.pt
+        dinov3_vitb16: models/vocabularies/dinov3_vlad_64.pt
+        dinov3_vits16plus: models/vocabularies/dinov3_vits16plus_vlad_32.pt
+    
+    # GeM settings
+    gem:
+      p: 3.0  # Power parameter
+      learnable: false  # Whether p is learnable (for training)
 
-# 预处理配置
+# Preprocessing Configuration
 preprocessing:
-  target_size: 896
-  patch_size: 14
-  mean: [0.485, 0.456, 0.406]
-  std: [0.229, 0.224, 0.225]
+  # Image sizes (will be auto-adjusted based on model)
+  database:
+    base_size: 720  # Original size
+    resize_mode: up  # up: round up to patch_size, down: round down
+    
+  query:
+    base_size: 900  # Original size  
+    resize_mode: down  # Preserve black borders
+    
+  # Normalization (ImageNet standards)
+  normalize:
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+
+# Retrieval Configuration
+retrieval:
+  # Index settings
+  index:
+    type: IndexFlatIP  # FAISS index type
+    use_gpu: true
+    gpu_id: 0
+    
+  # Search settings
+  search:
+    top_k: 10
+    rerank: false  # Whether to rerank results
+    
+  # Multi-model settings (future extension)
+  ensemble:
+    enabled: false
+    models: []
+    fusion_method: weighted  # weighted, rank, cascade
+    weights: []
+
+# Training Configuration (for ResNet+GeM and vocabulary)
+training:
+  # ResNet+GeM training
+  resnet_gem:
+    epochs: 30
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    temperature: 0.1
+    
+  # Vocabulary training
+  vocabulary:
+    sub_sample: 1  # Use every Nth image
+    num_iterations: 100
+    batch_size: 1024
+    
+# Logging Configuration
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  file: logs/anyloc.log
+  console: true
+  
+# Performance Monitoring
+performance:
+  profile: false  # Enable performance profiling
+  save_timings: true
+  timing_file: results/timings.json
+
+# Experiment Settings (optional)
+experiment:
+  name: default
+  description: "Default AnyLoc configuration"
+  tags: []
+  save_predictions: true
+  save_features: false
+
+# Model Profiles (predefined configurations)
+profiles:
+  # Original AnyLoc
+  dinov2_vlad_original:
+    extractor:
+      type: dinov2_vitg14
+      layer: 31
+      facet: value
+    aggregator:
+      type: vlad
+      vocab_path: models/aerial/c_centers.pt
+      
+  # DINOv2 + GeM (lightweight)
+  dinov2_gem_fast:
+    extractor:
+      type: dinov2_vitb14
+      layer: 11
+      facet: value
+    aggregator:
+      type: gem
+      p: 3.0
+      
+  # DINOv3 + VLAD
+  dinov3_vlad_advanced:
+    extractor:
+      type: dinov3_vitb16
+      layer: 11
+      facet: value
+    aggregator:
+      type: vlad
+      vocab_path: models/vocabularies/dinov3_vlad_64.pt
+      
+  # DINOv3 + GeM (balanced)
+  dinov3_gem_balanced:
+    extractor:
+      type: dinov3_vits16plus
+      layer: 11
+      facet: value
+    aggregator:
+      type: gem
+      p: 3.0
+      
+  # ResNet + GeM (fastest)
+  resnet_gem_light:
+    extractor:
+      type: resnet101
+      checkpoint_path: models/checkpoints/resnet_gem/simclr_best.pth
+    aggregator:
+      type: gem
+      p: 3.7  # Learned value from training
+
+# Quick profile switching
+# Uncomment to use a specific profile
+# use_profile: dinov3_gem_balanced
